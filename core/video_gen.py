@@ -165,7 +165,6 @@ def _render_with_wan(
         pipe = WanI2VPipeline.from_pretrained(
             WAN_MODEL_ID,
             torch_dtype=torch.bfloat16,
-            variant="bf16",
         )
         pipe.enable_model_cpu_offload()
 

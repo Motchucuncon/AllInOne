@@ -46,7 +46,6 @@ def _load_pipeline(model_id: str = DEFAULT_MODEL_ID) -> FluxPipeline:
     _pipeline = FluxPipeline.from_pretrained(
         model_id,
         torch_dtype=torch.bfloat16,
-        variant="bf16",  # Flux.1-schnell uses bf16 weights
     )
     _pipeline.enable_model_cpu_offload()  # offload to CPU when not in use
     # Enable memory-efficient attention if available
