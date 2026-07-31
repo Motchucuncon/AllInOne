@@ -160,13 +160,16 @@ def _render_with_wan(
         import torch
         from PIL import Image
 
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
         print(f"[video_gen] Loading Wan 2.1 pipeline from {WAN_MODEL_ID} ...")
+        print(f"[video_gen] Using device: {device}, dtype: {dtype}")
 
         pipe = WanI2VPipeline.from_pretrained(
             WAN_MODEL_ID,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
         )
-        pipe.enable_model_cpu_offload()
+        pipe = pipe.to(device)
 
         # Load and resize image
         image = Image.open(image_path).convert("RGB")
@@ -266,13 +269,16 @@ def _render_with_ltx(
         import torch
         from PIL import Image
 
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype = torch.float16 if device == "cuda" else torch.float32
         print(f"[video_gen] Loading LTX-Video pipeline from {LTX_MODEL_ID} ...")
+        print(f"[video_gen] Using device: {device}, dtype: {dtype}")
 
         pipe = LTXImageToVideoPipeline.from_pretrained(
             LTX_MODEL_ID,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
         )
-        pipe.enable_model_cpu_offload()
+        pipe = pipe.to(device)
 
         # Load and resize image
         image = Image.open(image_path).convert("RGB")

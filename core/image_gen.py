@@ -43,16 +43,20 @@ def _load_pipeline(model_id: str = DEFAULT_MODEL_ID) -> FluxPipeline:
 
     print(f"[image_gen] Loading Flux.1-schnell from {model_id} ...")
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    print(f"[image_gen] Using device: {device}, dtype: {dtype}")
+
     _pipeline = FluxPipeline.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16,
+        torch_dtype=dtype,
     )
-    _pipeline.enable_model_cpu_offload()  # offload to CPU when not in use
+    _pipeline = _pipeline.to(device)
     # Enable memory-efficient attention if available
     if hasattr(_pipeline, "enable_attention_slicing"):
         _pipeline.enable_attention_slicing()
 
-    print("[image_gen] Pipeline loaded successfully.")
+    print(f"[image_gen] Pipeline loaded successfully on {device}.")
     return _pipeline
 
 
