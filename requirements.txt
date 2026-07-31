@@ -1,0 +1,14 @@
+gradio>=4.0.0
+requests>=2.31.0
+diffusers>=0.27.0
+transformers>=4.40.0
+accelerate>=0.28.0
+torch>=2.1.0
+torchvision>=0.16.0
+edge-tts>=6.1.0
+moviepy>=1.0.3
+ffmpeg-python>=0.2.0
+imageio-ffmpeg>=0.4.9
+pillow>=10.0.0
+numpy>=1.24.0
+openai>=1.0.0
