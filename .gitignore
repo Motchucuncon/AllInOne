@@ -22,9 +22,6 @@ venv/
 .vscode/
 .idea/
 
-# Notebooks (upload manually to Colab, not tracked in repo)
-*.ipynb
-
 # OS
 .DS_Store
 Thumbs.db
