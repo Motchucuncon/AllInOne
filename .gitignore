@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Output files
+output/
+*.mp4
+*.mp3
+*.srt
+*.png
+*.jpg
+
+# Environment
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Notebooks (upload manually to Colab, not tracked in repo)
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
