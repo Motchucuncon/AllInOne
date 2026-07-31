@@ -64,42 +64,39 @@ def generate_review_video(
     tts_voice: str,
     openrouter_model: str,
     progress: gr.Progress = gr.Progress(),
-) -> tuple[str, str | None, list[str], str | None, str]:
+) -> tuple[str, str | None, list[str], list[str], str | None, str]:
     """Run the full pipeline and return results for display.
-
-    Parameters
-    ----------
-    api_key : str
-        OpenRouter API key.
-    topic : str
-        Review topic (Vietnamese).
-    video_model : str
-        "wan_2_1" or "ltx_video".
-    tts_voice : str
-        Edge-TTS voice name.
-    openrouter_model : str
-        OpenRouter model ID.
 
     Returns
     -------
     tuple
-        (status_text, audio_path, broll_image_paths, video_path, storyboard_json)
+        (log_text, audio_path, broll_image_paths, clip_paths, video_path, storyboard_json)
     """
     _ensure_output_dir()
+    log_lines = []
+
+    def add_log(msg: str):
+        print(msg)
+        log_lines.append(msg)
 
     # --- Validate inputs ---
     if not api_key.strip():
-        return "❌ Vui lòng nhập OpenRouter API Key.", None, [], None, ""
+        return "❌ Vui lòng nhập OpenRouter API Key.", None, [], [], None, ""
     if not topic.strip():
-        return "❌ Vui lòng nhập Chủ đề Review.", None, [], None, ""
+        return "❌ Vui lòng nhập Chủ đề Review.", None, [], [], None, ""
 
-    # Set API key
     os.environ["OPENROUTER_API_KEY"] = api_key
 
     # ------------------------------------------------------------------
     # STEP 1: Generate Storyboard
     # ------------------------------------------------------------------
+    add_log("\n" + "=" * 60)
+    add_log("📝 BƯỚC 1/5: TẠO STORYBOARD VỚI OPENROUTER")
+    add_log("=" * 60)
+    add_log(f"   • Model AI: {openrouter_model}")
+    add_log(f"   • Chủ đề: {topic}")
     progress(0.05, desc="📝 Bước 1/5: Tạo Storyboard với OpenRouter...")
+
     try:
         storyboard = generate_storyboard(
             topic=topic,
@@ -108,16 +105,31 @@ def generate_review_video(
         )
         scenes = storyboard.get("storyboard_scenes", [])
         if not scenes:
-            return "❌ Không có scene nào trong storyboard.", None, [], None, ""
+            return "❌ Không có scene nào trong storyboard.", None, [], [], None, ""
         storyboard_json = json.dumps(storyboard, ensure_ascii=False, indent=2)
-        print(f"[app] ✅ Storyboard: {len(scenes)} scenes")
+        add_log(f"   ✅ Đã tạo {len(scenes)} scenes")
+        add_log(f"   📝 Narration: {storyboard['full_narration'][:100]}...")
+
+        # Log chi tiết từng scene
+        for i, scene in enumerate(scenes):
+            add_log(f"\n   --- Scene {scene['scene_id']} ---")
+            add_log(f"   📝 Narration: {scene['narration_chunk'][:80]}...")
+            add_log(f"   🖼️  B-roll Prompt: {scene['broll_prompt'][:80]}...")
     except Exception as exc:
-        return f"❌ Lỗi Storyboard: {exc}", None, [], None, ""
+        err = f"❌ Lỗi Storyboard: {exc}"
+        add_log(err)
+        return "\n".join(log_lines), None, [], [], None, ""
 
     # ------------------------------------------------------------------
     # STEP 2: Generate Audio & Subtitles
     # ------------------------------------------------------------------
+    add_log("\n" + "=" * 60)
+    add_log("🔊 BƯỚC 2/5: TẠO AUDIO THUYẾT MINH VỚI EDGE-TTS")
+    add_log("=" * 60)
+    add_log(f"   • Giọng đọc: {tts_voice}")
+    add_log(f"   • Độ dài văn bản: {len(storyboard['full_narration'])} ký tự")
     progress(0.20, desc="🔊 Bước 2/5: Tạo Audio thuyết minh với Edge-TTS...")
+
     try:
         audio_result = generate_audio_and_subtitles(
             storyboard=storyboard,
@@ -128,16 +140,31 @@ def generate_review_video(
         subtitles_path = audio_result["subtitles_path"]
         duration = audio_result["duration_seconds"]
         scenes = audio_result["scenes"]
-        print(f"[app] ✅ Audio: {duration:.1f}s — {audio_path}")
+        add_log(f"   ✅ Audio: {audio_path}")
+        add_log(f"   ✅ Subtitles: {subtitles_path}")
+        add_log(f"   ⏱️  Thời lượng: {duration:.1f}s")
     except Exception as exc:
-        return f"❌ Lỗi Audio: {exc}", None, [], None, storyboard_json
+        err = f"❌ Lỗi Audio: {exc}"
+        add_log(err)
+        return "\n".join(log_lines), None, [], [], None, storyboard_json
 
     # ------------------------------------------------------------------
     # STEP 3: Generate B-roll Images (Flux.1-schnell)
     # ------------------------------------------------------------------
-    progress(0.40, desc="🖼️ Bước 3/5: Tạo ảnh B-roll với Flux.1-schnell...")
     broll_prompts = [s.get("broll_prompt", "") for s in scenes]
     scene_ids = [s.get("scene_id", i + 1) for i, s in enumerate(scenes)]
+
+    add_log("\n" + "=" * 60)
+    add_log("🖼️  BƯỚC 3/5: TẠO ẢNH B-ROLL VỚI FLUX.1-SCHNELL")
+    add_log("=" * 60)
+    add_log(f"   • Tổng số ảnh cần tạo: {len(broll_prompts)}")
+
+    for i, (prompt, sid) in enumerate(zip(broll_prompts, scene_ids)):
+        add_log(f"\n   --- Đang tạo ảnh Scene {sid} ({i+1}/{len(broll_prompts)}) ---")
+        add_log(f"   🖼️  Prompt: {prompt}")
+        progress(0.30 + 0.30 * (i / len(broll_prompts)),
+                 desc=f"🖼️  Đang tạo ảnh Scene {sid}...")
+
     try:
         image_paths = generate_broll_images(
             prompts=broll_prompts,
@@ -145,14 +172,29 @@ def generate_review_video(
             output_dir=os.path.join(OUTPUT_DIR, "images"),
             unload_after=True,
         )
-        print(f"[app] ✅ {len(image_paths)} B-roll images")
+        add_log(f"\n   ✅ Đã tạo {len(image_paths)} ảnh B-roll:")
+        for img_path in image_paths:
+            add_log(f"      • {os.path.basename(img_path)}")
     except Exception as exc:
-        return f"❌ Lỗi sinh ảnh B-roll: {exc}", audio_path, [], None, storyboard_json
+        err = f"❌ Lỗi sinh ảnh B-roll: {exc}"
+        add_log(err)
+        return "\n".join(log_lines), audio_path, [], [], None, storyboard_json
 
     # ------------------------------------------------------------------
     # STEP 4: Render Video Clips (Wan 2.1 / LTX-Video)
     # ------------------------------------------------------------------
-    progress(0.65, desc=f"🎬 Bước 4/5: Render video clips với {video_model}...")
+    add_log("\n" + "=" * 60)
+    add_log(f"🎬 BƯỚC 4/5: RENDER VIDEO CLIPS VỚI {video_model.upper()}")
+    add_log("=" * 60)
+    add_log(f"   • Model: {video_model}")
+    add_log(f"   • Số clip: {len(image_paths)}")
+
+    for i, (sid, img_path) in enumerate(zip(scene_ids, image_paths)):
+        add_log(f"\n   --- Đang render Scene {sid} ({i+1}/{len(image_paths)}) ---")
+        add_log(f"   📁 Ảnh đầu vào: {os.path.basename(img_path)}")
+        progress(0.60 + 0.20 * (i / len(image_paths)),
+                 desc=f"🎬 Đang render clip Scene {sid}...")
+
     try:
         clip_paths = render_video_clips(
             image_paths=image_paths,
@@ -161,14 +203,22 @@ def generate_review_video(
             model=video_model,
             output_dir=os.path.join(OUTPUT_DIR, "clips"),
         )
-        print(f"[app] ✅ {len(clip_paths)} video clips")
+        add_log(f"\n   ✅ Đã render {len(clip_paths)} clips:")
+        for clip_path in clip_paths:
+            add_log(f"      • {os.path.basename(clip_path)}")
     except Exception as exc:
-        return f"❌ Lỗi render video: {exc}", audio_path, image_paths, None, storyboard_json
+        err = f"❌ Lỗi render video: {exc}"
+        add_log(err)
+        return "\n".join(log_lines), audio_path, image_paths, [], None, storyboard_json
 
     # ------------------------------------------------------------------
     # STEP 5: Compose Final Video
     # ------------------------------------------------------------------
+    add_log("\n" + "=" * 60)
+    add_log("🎞️  BƯỚC 5/5: GHÉP VIDEO HOÀN CHỈNH")
+    add_log("=" * 60)
     progress(0.85, desc="🎞️ Bước 5/5: Ghép video hoàn chỉnh...")
+
     try:
         final_video_path = compose_final_video(
             clip_paths=clip_paths,
@@ -176,22 +226,25 @@ def generate_review_video(
             subtitles_path=subtitles_path,
             output_dir=OUTPUT_DIR,
         )
-        print(f"[app] ✅ Final video: {final_video_path}")
+        add_log(f"\n   ✅ Final video: {final_video_path}")
     except Exception as exc:
-        return f"❌ Lỗi ghép video: {exc}", audio_path, image_paths, None, storyboard_json
+        err = f"❌ Lỗi ghép video: {exc}"
+        add_log(err)
+        return "\n".join(log_lines), audio_path, image_paths, clip_paths, None, storyboard_json
 
     progress(1.0, desc="✅ Hoàn thành!")
 
-    status = (
-        f"✅ **Tạo video thành công!**\n\n"
-        f"📝 **Chủ đề:** {topic}\n"
-        f"🎬 **Model Video:** {video_model}\n"
-        f"📋 **Số scene:** {len(scenes)}\n"
-        f"⏱️ **Thời lượng:** {duration:.1f} giây\n"
-        f"📁 **File đầu ra:** `{final_video_path}`"
-    )
+    add_log("\n" + "=" * 60)
+    add_log("🎉 PIPELINE HOÀN THÀNH!")
+    add_log("=" * 60)
+    add_log(f"   📝 Chủ đề: {topic}")
+    add_log(f"   🎬 Model Video: {video_model}")
+    add_log(f"   📋 Số scene: {len(scenes)}")
+    add_log(f"   ⏱️ Thời lượng: {duration:.1f}s")
+    add_log(f"   📁 File đầu ra: {final_video_path}")
 
-    return status, audio_path, image_paths, final_video_path, storyboard_json
+    log_html = "<div class='log-box'><pre>" + "\n".join(log_lines) + "</pre></div>"
+    return log_html, audio_path, image_paths, clip_paths, final_video_path, storyboard_json
 
 
 # ---------------------------------------------------------------------------
@@ -202,8 +255,9 @@ def build_ui() -> gr.Blocks:
     """Build and return the Gradio Blocks UI."""
 
     css = """
-    .gradio-container { max-width: 1000px; margin: auto; }
+    .gradio-container { max-width: 1200px; margin: auto; }
     footer { display: none !important; }
+    .log-box { font-family: monospace; font-size: 13px; background: #1e1e1e; color: #d4d4d4; border-radius: 6px; padding: 10px; height: 300px; overflow-y: auto; }
     """
 
     with gr.Blocks(
@@ -215,7 +269,7 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(
             """
             # 🎬 Faceless Review Video Generator
-            **Tự động tạo video Review với AI — Chỉ cần nhập chủ đề!**
+            **Tự động tạo video Review với AI — Chi tiết từng bước!**
             """
         )
 
@@ -262,40 +316,53 @@ def build_ui() -> gr.Blocks:
                     size="lg",
                 )
 
-                status = gr.Markdown("👉 _Điền thông tin và nhấn nút để bắt đầu..._")
-
             with gr.Column(scale=1):
-                # ======== OUTPUT PANEL ========
-                gr.Markdown("## 🎯 Kết quả đầu ra")
+                # ======== LOG OUTPUT ========
+                gr.Markdown("## 📋 Log chi tiết")
+                log_output = gr.HTML(
+                    label="Log chi tiết",
+                    value="<div class='log-box'><pre style='color:#888;'>👉 Điền thông tin và nhấn nút để bắt đầu...</pre></div>",
+                )
 
-                with gr.Tabs():
-                    with gr.TabItem("🎥 Video Review"):
-                        video_output = gr.Video(
-                            label="Video Review Hoàn Chỉnh",
-                            height=360,
-                            interactive=False,
-                        )
+        # ======== OUTPUT PANEL ========
+        gr.Markdown("## 🎯 Kết quả đầu ra")
+        with gr.Tabs():
+            with gr.TabItem("🎥 Video Review"):
+                video_output = gr.Video(
+                    label="Video Review Hoàn Chỉnh",
+                    height=400,
+                    interactive=False,
+                )
 
-                    with gr.TabItem("🔊 Audio Thuyết Minh"):
-                        audio_output = gr.Audio(
-                            label="Audio thuyết minh (MP3)",
-                            type="filepath",
-                            interactive=False,
-                        )
+            with gr.TabItem("🖼️ Ảnh B-roll Trung Gian"):
+                gallery_output = gr.Gallery(
+                    label="Ảnh B-roll đã tạo (theo từng scene)",
+                    columns=3,
+                    rows=2,
+                    height=400,
+                    object_fit="contain",
+                )
 
-                    with gr.TabItem("🖼️ B-roll Clips"):
-                        gallery_output = gr.Gallery(
-                            label="Ảnh B-roll đã tạo",
-                            columns=3,
-                            rows=2,
-                            height=300,
-                            object_fit="contain",
-                        )
+            with gr.TabItem("🎬 Clip Video Trung Gian"):
+                clip_gallery = gr.Gallery(
+                    label="Video clips đã render (theo từng scene)",
+                    columns=2,
+                    rows=2,
+                    height=400,
+                    object_fit="contain",
+                )
 
-                    with gr.TabItem("📋 Storyboard JSON"):
-                        storyboard_output = gr.JSON(
-                            label="Storyboard JSON",
-                        )
+            with gr.TabItem("🔊 Audio Thuyết Minh"):
+                audio_output = gr.Audio(
+                    label="Audio thuyết minh (MP3)",
+                    type="filepath",
+                    interactive=False,
+                )
+
+            with gr.TabItem("📋 Storyboard JSON"):
+                storyboard_output = gr.JSON(
+                    label="Storyboard JSON",
+                )
 
         # ======== EVENT HANDLER ========
         run_btn.click(
@@ -308,9 +375,10 @@ def build_ui() -> gr.Blocks:
                 openrouter_model,
             ],
             outputs=[
-                status,
+                log_output,
                 audio_output,
                 gallery_output,
+                clip_gallery,
                 video_output,
                 storyboard_output,
             ],
@@ -332,7 +400,7 @@ def build_ui() -> gr.Blocks:
 
 
 # ---------------------------------------------------------------------------
-# Entry point — bắt buộc phải có dòng này để sinh link Gradio public
+# Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     demo = build_ui()
