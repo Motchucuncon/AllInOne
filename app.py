@@ -79,25 +79,26 @@ def generate_review_video(
         print(msg)
         log_lines.append(msg)
 
-    # --- Validate inputs ---
-    if not api_key.strip():
-        return "❌ Vui lòng nhập OpenRouter API Key.", None, [], [], None, ""
-    if not topic.strip():
-        return "❌ Vui lòng nhập Chủ đề Review.", None, [], [], None, ""
-
-    os.environ["OPENROUTER_API_KEY"] = api_key
-
-    # ------------------------------------------------------------------
-    # STEP 1: Generate Storyboard
-    # ------------------------------------------------------------------
-    add_log("\n" + "=" * 60)
-    add_log("📝 BƯỚC 1/5: TẠO STORYBOARD VỚI OPENROUTER")
-    add_log("=" * 60)
-    add_log(f"   • Model AI: {openrouter_model}")
-    add_log(f"   • Chủ đề: {topic}")
-    progress(0.05, desc="📝 Bước 1/5: Tạo Storyboard với OpenRouter...")
-
+    # ===== MỘT TRY...EXCEPT DUY NHẤT BAO BỌC TOÀN BỘ PIPELINE =====
     try:
+        # --- Validate inputs ---
+        if not api_key.strip():
+            raise ValueError("❌ Vui lòng nhập OpenRouter API Key.")
+        if not topic.strip():
+            raise ValueError("❌ Vui lòng nhập Chủ đề Review.")
+
+        os.environ["OPENROUTER_API_KEY"] = api_key
+
+        # ------------------------------------------------------------------
+        # STEP 1: Generate Storyboard
+        # ------------------------------------------------------------------
+        add_log("\n" + "=" * 60)
+        add_log("📝 BƯỚC 1/5: TẠO STORYBOARD VỚI OPENROUTER")
+        add_log("=" * 60)
+        add_log(f"   • Model AI: {openrouter_model}")
+        add_log(f"   • Chủ đề: {topic}")
+        progress(0.05, desc="📝 Bước 1/5: Tạo Storyboard với OpenRouter...")
+
         storyboard = generate_storyboard(
             topic=topic,
             model=openrouter_model,
@@ -105,32 +106,25 @@ def generate_review_video(
         )
         scenes = storyboard.get("storyboard_scenes", [])
         if not scenes:
-            return "❌ Không có scene nào trong storyboard.", None, [], [], None, ""
+            raise ValueError("❌ Storyboard không có scene nào.")
         storyboard_json = json.dumps(storyboard, ensure_ascii=False, indent=2)
         add_log(f"   ✅ Đã tạo {len(scenes)} scenes")
         add_log(f"   📝 Narration: {storyboard['full_narration'][:100]}...")
-
-        # Log chi tiết từng scene
-        for i, scene in enumerate(scenes):
+        for scene in scenes:
             add_log(f"\n   --- Scene {scene['scene_id']} ---")
             add_log(f"   📝 Narration: {scene['narration_chunk'][:80]}...")
             add_log(f"   🖼️  B-roll Prompt: {scene['broll_prompt'][:80]}...")
-    except Exception as exc:
-        err = f"❌ Lỗi Storyboard: {exc}"
-        add_log(err)
-        return "\n".join(log_lines), None, [], [], None, ""
 
-    # ------------------------------------------------------------------
-    # STEP 2: Generate Audio & Subtitles
-    # ------------------------------------------------------------------
-    add_log("\n" + "=" * 60)
-    add_log("🔊 BƯỚC 2/5: TẠO AUDIO THUYẾT MINH VỚI EDGE-TTS")
-    add_log("=" * 60)
-    add_log(f"   • Giọng đọc: {tts_voice}")
-    add_log(f"   • Độ dài văn bản: {len(storyboard['full_narration'])} ký tự")
-    progress(0.20, desc="🔊 Bước 2/5: Tạo Audio thuyết minh với Edge-TTS...")
+        # ------------------------------------------------------------------
+        # STEP 2: Generate Audio & Subtitles
+        # ------------------------------------------------------------------
+        add_log("\n" + "=" * 60)
+        add_log("🔊 BƯỚC 2/5: TẠO AUDIO THUYẾT MINH VỚI EDGE-TTS")
+        add_log("=" * 60)
+        add_log(f"   • Giọng đọc: {tts_voice}")
+        add_log(f"   • Độ dài văn bản: {len(storyboard['full_narration'])} ký tự")
+        progress(0.20, desc="🔊 Bước 2/5: Tạo Audio thuyết minh với Edge-TTS...")
 
-    try:
         audio_result = generate_audio_and_subtitles(
             storyboard=storyboard,
             voice=tts_voice,
@@ -143,29 +137,24 @@ def generate_review_video(
         add_log(f"   ✅ Audio: {audio_path}")
         add_log(f"   ✅ Subtitles: {subtitles_path}")
         add_log(f"   ⏱️  Thời lượng: {duration:.1f}s")
-    except Exception as exc:
-        err = f"❌ Lỗi Audio: {exc}"
-        add_log(err)
-        return "\n".join(log_lines), None, [], [], None, storyboard_json
 
-    # ------------------------------------------------------------------
-    # STEP 3: Generate B-roll Images (Flux.1-schnell)
-    # ------------------------------------------------------------------
-    broll_prompts = [s.get("broll_prompt", "") for s in scenes]
-    scene_ids = [s.get("scene_id", i + 1) for i, s in enumerate(scenes)]
+        # ------------------------------------------------------------------
+        # STEP 3: Generate B-roll Images (Flux.1-schnell)
+        # ------------------------------------------------------------------
+        broll_prompts = [s.get("broll_prompt", "") for s in scenes]
+        scene_ids = [s.get("scene_id", i + 1) for i, s in enumerate(scenes)]
 
-    add_log("\n" + "=" * 60)
-    add_log("🖼️  BƯỚC 3/5: TẠO ẢNH B-ROLL VỚI FLUX.1-SCHNELL")
-    add_log("=" * 60)
-    add_log(f"   • Tổng số ảnh cần tạo: {len(broll_prompts)}")
+        add_log("\n" + "=" * 60)
+        add_log("🖼️  BƯỚC 3/5: TẠO ẢNH B-ROLL VỚI FLUX.1-SCHNELL")
+        add_log("=" * 60)
+        add_log(f"   • Tổng số ảnh cần tạo: {len(broll_prompts)}")
 
-    for i, (prompt, sid) in enumerate(zip(broll_prompts, scene_ids)):
-        add_log(f"\n   --- Đang tạo ảnh Scene {sid} ({i+1}/{len(broll_prompts)}) ---")
-        add_log(f"   🖼️  Prompt: {prompt}")
-        progress(0.30 + 0.30 * (i / len(broll_prompts)),
-                 desc=f"🖼️  Đang tạo ảnh Scene {sid}...")
+        for i, (prompt, sid) in enumerate(zip(broll_prompts, scene_ids)):
+            add_log(f"\n   --- Đang tạo ảnh Scene {sid} ({i+1}/{len(broll_prompts)}) ---")
+            add_log(f"   🖼️  Prompt: {prompt}")
+            progress(0.30 + 0.30 * (i / len(broll_prompts)),
+                     desc=f"🖼️  Đang tạo ảnh Scene {sid}...")
 
-    try:
         image_paths = generate_broll_images(
             prompts=broll_prompts,
             scene_ids=scene_ids,
@@ -175,27 +164,22 @@ def generate_review_video(
         add_log(f"\n   ✅ Đã tạo {len(image_paths)} ảnh B-roll:")
         for img_path in image_paths:
             add_log(f"      • {os.path.basename(img_path)}")
-    except Exception as exc:
-        err = f"❌ Lỗi sinh ảnh B-roll: {exc}"
-        add_log(err)
-        return "\n".join(log_lines), audio_path, [], [], None, storyboard_json
 
-    # ------------------------------------------------------------------
-    # STEP 4: Render Video Clips (Wan 2.1 / LTX-Video)
-    # ------------------------------------------------------------------
-    add_log("\n" + "=" * 60)
-    add_log(f"🎬 BƯỚC 4/5: RENDER VIDEO CLIPS VỚI {video_model.upper()}")
-    add_log("=" * 60)
-    add_log(f"   • Model: {video_model}")
-    add_log(f"   • Số clip: {len(image_paths)}")
+        # ------------------------------------------------------------------
+        # STEP 4: Render Video Clips (Wan 2.1 / LTX-Video)
+        # ------------------------------------------------------------------
+        add_log("\n" + "=" * 60)
+        add_log(f"🎬 BƯỚC 4/5: RENDER VIDEO CLIPS VỚI {video_model.upper()}")
+        add_log("=" * 60)
+        add_log(f"   • Model: {video_model}")
+        add_log(f"   • Số clip: {len(image_paths)}")
 
-    for i, (sid, img_path) in enumerate(zip(scene_ids, image_paths)):
-        add_log(f"\n   --- Đang render Scene {sid} ({i+1}/{len(image_paths)}) ---")
-        add_log(f"   📁 Ảnh đầu vào: {os.path.basename(img_path)}")
-        progress(0.60 + 0.20 * (i / len(image_paths)),
-                 desc=f"🎬 Đang render clip Scene {sid}...")
+        for i, (sid, img_path) in enumerate(zip(scene_ids, image_paths)):
+            add_log(f"\n   --- Đang render Scene {sid} ({i+1}/{len(image_paths)}) ---")
+            add_log(f"   📁 Ảnh đầu vào: {os.path.basename(img_path)}")
+            progress(0.60 + 0.20 * (i / len(image_paths)),
+                     desc=f"🎬 Đang render clip Scene {sid}...")
 
-    try:
         clip_paths = render_video_clips(
             image_paths=image_paths,
             prompts=broll_prompts,
@@ -206,20 +190,15 @@ def generate_review_video(
         add_log(f"\n   ✅ Đã render {len(clip_paths)} clips:")
         for clip_path in clip_paths:
             add_log(f"      • {os.path.basename(clip_path)}")
-    except Exception as exc:
-        err = f"❌ Lỗi render video: {exc}"
-        add_log(err)
-        return "\n".join(log_lines), audio_path, image_paths, [], None, storyboard_json
 
-    # ------------------------------------------------------------------
-    # STEP 5: Compose Final Video
-    # ------------------------------------------------------------------
-    add_log("\n" + "=" * 60)
-    add_log("🎞️  BƯỚC 5/5: GHÉP VIDEO HOÀN CHỈNH")
-    add_log("=" * 60)
-    progress(0.85, desc="🎞️ Bước 5/5: Ghép video hoàn chỉnh...")
+        # ------------------------------------------------------------------
+        # STEP 5: Compose Final Video
+        # ------------------------------------------------------------------
+        add_log("\n" + "=" * 60)
+        add_log("🎞️  BƯỚC 5/5: GHÉP VIDEO HOÀN CHỈNH")
+        add_log("=" * 60)
+        progress(0.85, desc="🎞️ Bước 5/5: Ghép video hoàn chỉnh...")
 
-    try:
         final_video_path = compose_final_video(
             clip_paths=clip_paths,
             audio_path=audio_path,
@@ -227,24 +206,43 @@ def generate_review_video(
             output_dir=OUTPUT_DIR,
         )
         add_log(f"\n   ✅ Final video: {final_video_path}")
-    except Exception as exc:
-        err = f"❌ Lỗi ghép video: {exc}"
-        add_log(err)
-        return "\n".join(log_lines), audio_path, image_paths, clip_paths, None, storyboard_json
 
-    progress(1.0, desc="✅ Hoàn thành!")
+        progress(1.0, desc="✅ Hoàn thành!")
 
-    add_log("\n" + "=" * 60)
-    add_log("🎉 PIPELINE HOÀN THÀNH!")
-    add_log("=" * 60)
-    add_log(f"   📝 Chủ đề: {topic}")
-    add_log(f"   🎬 Model Video: {video_model}")
-    add_log(f"   📋 Số scene: {len(scenes)}")
-    add_log(f"   ⏱️ Thời lượng: {duration:.1f}s")
-    add_log(f"   📁 File đầu ra: {final_video_path}")
+        add_log("\n" + "=" * 60)
+        add_log("🎉 PIPELINE HOÀN THÀNH!")
+        add_log("=" * 60)
+        add_log(f"   📝 Chủ đề: {topic}")
+        add_log(f"   🎬 Model Video: {video_model}")
+        add_log(f"   📋 Số scene: {len(scenes)}")
+        add_log(f"   ⏱️ Thời lượng: {duration:.1f}s")
+        add_log(f"   📁 File đầu ra: {final_video_path}")
 
-    log_html = "<div class='log-box'><pre>" + "\n".join(log_lines) + "</pre></div>"
-    return log_html, audio_path, image_paths, clip_paths, final_video_path, storyboard_json
+        log_html = "<div class='log-box'><pre>" + "\n".join(log_lines) + "</pre></div>"
+        return log_html, audio_path, image_paths, clip_paths, final_video_path, storyboard_json
+
+    except Exception:
+        # ===== BẮT LỖI: In toàn bộ traceback chi tiết, màu đỏ =====
+        import traceback
+        tb_text = traceback.format_exc()
+        print(tb_text)  # stdout
+        log_lines.append("\n❌ " + "=" * 56)
+        log_lines.append("❌  PIPELINE THẤT BẠI!")
+        log_lines.append("❌ " + "=" * 56)
+        log_lines.append("")
+        log_lines.extend(tb_text.strip().split("\n"))
+        log_lines.append("")
+        log_lines.append("❌ " + "=" * 56)
+        log_lines.append("❌  VUI LÒNG KIỂM TRA LỖI VÀ THỬ LẠI")
+        log_lines.append("❌ " + "=" * 56)
+
+        error_html = (
+            "<div class='log-box' style='border: 2px solid #ff4444;'>"
+            "<pre style='color: #ff6b6b; white-space: pre-wrap; word-wrap: break-word;'>"
+            + "\n".join(log_lines)
+            + "</pre></div>"
+        )
+        return error_html, None, [], [], None, ""
 
 
 # ---------------------------------------------------------------------------
